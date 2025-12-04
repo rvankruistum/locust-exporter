@@ -3,10 +3,14 @@
 # Self-contained, reproducible, and includes version injection
 
 # Stage 1: Build
-FROM golang:1.24-alpine AS builder
+# Use Debian-based image to avoid Alpine ARM64 emulation issues
+FROM golang:1.24-bookworm AS builder
 
-# Install git (needed for version info)
-RUN apk add --no-cache git ca-certificates
+# Install git and ca-certificates (needed for version info and HTTPS)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
 
