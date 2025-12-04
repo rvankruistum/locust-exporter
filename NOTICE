@@ -1,0 +1,36 @@
+Locust Exporter
+Copyright 2019 Container Solutions
+Copyright 2025 Ruben van Kruistum
+
+This project is a maintained fork of the original Locust Exporter by Container Solutions:
+https://github.com/ContainerSolutions/locust_exporter
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+---
+
+MODIFICATIONS:
+
+This fork includes the following significant changes from the original:
+
+- Updated Go from v1.12 to v1.24
+- Updated all Prometheus dependencies to latest versions
+- Added comprehensive test suite (80% coverage)
+- Modernized CI/CD with GitHub Actions security best practices
+- Added Trivy vulnerability scanning
+- Added CodeQL static analysis
+- Simplified build system (removed promu dependency)
+- Multi-platform Docker support (amd64, arm64)
+- Fixed all known CVEs
+
+See CHANGELOG.md for detailed modification history.

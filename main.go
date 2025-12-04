@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -13,8 +13,8 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"github.com/prometheus/common/log"
 	"github.com/prometheus/common/version"
 	"gopkg.in/alecthomas/kingpin.v2"
 )
@@ -332,17 +332,21 @@ func (e *Exporter) scrape(ch chan<- prometheus.Metric) (up float64) {
 
 	body, err := e.fetch("/stats/requests")
 	if err != nil {
-		log.Errorf("Can't scrape Pack: %v", err)
+		slog.Error("Can't scrape Pack", "error", err)
 		return 0
 	}
 	defer body.Close()
 
-	bodyAll, err := ioutil.ReadAll(body)
+	bodyAll, err := io.ReadAll(body)
 	if err != nil {
+		slog.Error("Failed to read response body", "error", err)
 		return 0
 	}
 
-	_ = json.Unmarshal([]byte(bodyAll), &locustStats)
+	if err := json.Unmarshal([]byte(bodyAll), &locustStats); err != nil {
+		slog.Error("Failed to parse JSON response", "error", err)
+		return 0
+	}
 
 	ch <- prometheus.MustNewConstMetric(e.locustUsers.Desc(), prometheus.GaugeValue, float64(locustStats.UserCount))
 	ch <- prometheus.MustNewConstMetric(e.locustFailRatio.Desc(), prometheus.GaugeValue, float64(locustStats.FailRatio))
@@ -428,21 +432,21 @@ func main() {
 		timeout       = kingpin.Flag("locust.timeout", "Scrape timeout").Default("5s").Envar("LOCUST_EXPORTER_TIMEOUT").Duration()
 	)
 
-	log.AddFlags(kingpin.CommandLine)
 	kingpin.Version(version.Print("locust_exporter"))
 	kingpin.HelpFlag.Short('h')
 	kingpin.Parse()
 
 	namespace = *NameSpace
-	log.Infoln("Starting locust_exporter", version.Info())
-	log.Infoln("Build context", version.BuildContext())
+	slog.Info("Starting locust_exporter", "version", version.Info())
+	slog.Info("Build context", "context", version.BuildContext())
 
 	exporter, err := NewExporter(*uri, *timeout)
 	if err != nil {
-		log.Fatal(err)
+		slog.Error("Failed to create exporter", "error", err)
+		os.Exit(1)
 	}
 	prometheus.MustRegister(exporter)
-	prometheus.MustRegister(version.NewCollector("locustexporter"))
+	prometheus.MustRegister(collectors.NewBuildInfoCollector())
 
 	http.Handle(*metricsPath, promhttp.Handler())
 	http.HandleFunc("/quitquitquit", func(http.ResponseWriter, *http.Request) { os.Exit(0) })
@@ -450,6 +454,9 @@ func main() {
 		_, _ = w.Write([]byte(`<html><head><title>Locust Exporter</title></head><body><h1>Locust Exporter</h1><p><a href='` + *metricsPath + `'>Metrics</a></p></body></html>`))
 	})
 
-	log.Infoln("Listening on", *listenAddress)
-	log.Fatal(http.ListenAndServe(*listenAddress, nil))
+	slog.Info("Listening on", "address", *listenAddress)
+	if err := http.ListenAndServe(*listenAddress, nil); err != nil {
+		slog.Error("HTTP server failed", "error", err)
+		os.Exit(1)
+	}
 }

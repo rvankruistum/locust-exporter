@@ -1,10 +1,30 @@
 # Locust Exporter
 
+> **Note:** This is a maintained fork of [ContainerSolutions/locust_exporter](https://github.com/ContainerSolutions/locust_exporter), which is no longer actively maintained. This fork includes security updates, Go 1.24, comprehensive tests, and modern CI/CD practices.
+
 Prometheus exporter for [Locust](https://github.com/locustio/locust). This exporter was inspired by [mbolek/locust_exporter](https://github.com/mbolek/locust_exporter).
 
-[![Docker Pulls](https://img.shields.io/docker/pulls/containersol/locust_exporter.svg)](https://hub.docker.com/r/containersol/locust_exporter/tags) [![license](https://img.shields.io/github/license/ContainerSolutions/locust_exporter.svg)](https://github.com/ContainerSolutions/locust_exporter/blob/master/LICENSE)
+[![Docker Pulls](https://img.shields.io/docker/pulls/rvankruistum/locust-exporter.svg)](https://hub.docker.com/r/rvankruistum/locust-exporter/tags) 
+[![License](https://img.shields.io/github/license/rvankruistum/locust-exporter.svg)](https://github.com/rvankruistum/locust-exporter/blob/main/LICENSE)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/rvankruistum/locust-exporter)](https://github.com/rvankruistum/locust-exporter)
+[![Tests](https://github.com/rvankruistum/locust-exporter/workflows/CI/badge.svg)](https://github.com/rvankruistum/locust-exporter/actions)
 
 ![locust_dashboard](locust_dashboard.png)
+
+## What's New in This Fork
+
+This maintained fork includes significant improvements:
+
+- **Modern Go**: Updated from Go 1.12 to Go 1.24
+- **Security**: All CVEs fixed, dependencies updated to latest stable versions
+- **Testing**: Comprehensive test suite with 80% code coverage
+- **CI/CD**: Modern GitHub Actions workflows with security scanning (Trivy, CodeQL)
+- **Build System**: Simplified Makefile, removed Promu dependency
+- **Docker**: Multi-platform support (amd64, arm64), optimized multi-stage builds
+- **Supply Chain Security**: All GitHub Actions pinned to commit SHAs, Dependabot enabled
+- **Logging**: Migrated from deprecated prometheus/common/log to log/slog
+
+See [CHANGELOG.md](CHANGELOG.md) for detailed changes.
 
 ## Quick Start
 
@@ -17,7 +37,7 @@ This package is available for Docker:
     with docker:
 
     ```bash
-    docker run --net=host containersol/locust_exporter
+    docker run --net=host rvankruistum/locust-exporter
     ```
 
     or with docker-compose:
@@ -27,7 +47,7 @@ This package is available for Docker:
 
     services:
       locust-exporter:
-        image: containersol/locust_exporter
+        image: rvankruistum/locust-exporter
         network_mode: "host"
     ```
 
@@ -44,12 +64,23 @@ This package is available for Docker:
 
 ## Building and Running
 
-The default way to build is:
+### Prerequisites
+
+- Go 1.24 or later
+- Docker (optional, for containerized builds)
+
+### Quick Build
 
 ```bash
-go get github.com/ContainerSolutions/locust_exporter
-cd ${GOPATH-$HOME/go}/src/github.com/ContainerSolutions/locust_exporter/
-go run main.go
+# Clone the repository
+git clone https://github.com/rvankruistum/locust-exporter.git
+cd locust-exporter
+
+# Build using Makefile
+make build
+
+# Run
+./locust_exporter --locust.uri=http://localhost:8089
 ```
 
 ### Flags
@@ -113,4 +144,10 @@ Please see [CONTRIBUTING](CONTRIBUTING.md) for details.
 
 ## License
 
-Apache License. Please see [License File](LICENSE.md) for more information.
+Apache License 2.0. Please see [LICENSE](LICENSE) for more information.
+
+## Original Project
+
+This is a fork of [ContainerSolutions/locust_exporter](https://github.com/ContainerSolutions/locust_exporter).  
+Original copyright 2019 Container Solutions.  
+See [NOTICE](NOTICE) for attribution details.
