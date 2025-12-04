@@ -335,7 +335,7 @@ func (e *Exporter) scrape(ch chan<- prometheus.Metric) (up float64) {
 		slog.Error("Can't scrape Pack", "error", err)
 		return 0
 	}
-	defer body.Close()
+	defer func() { _ = body.Close() }()
 
 	bodyAll, err := io.ReadAll(body)
 	if err != nil {
@@ -381,9 +381,10 @@ func (e *Exporter) scrape(ch chan<- prometheus.Metric) (up float64) {
 
 	var running = 0 //stopped
 
-	if locustStats.State == "hatching" {
+	switch locustStats.State {
+	case "hatching":
 		running = 1
-	} else if locustStats.State == "running" {
+	case "running":
 		running = 2
 	}
 
@@ -404,8 +405,8 @@ func fetchHTTP(uri string, timeout time.Duration) func(endpoint string) (io.Read
 		if err != nil {
 			return nil, err
 		}
-		if !(resp.StatusCode >= 200 && resp.StatusCode < 300) {
-			resp.Body.Close()
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			_ = resp.Body.Close()
 			return nil, fmt.Errorf("HTTP status %d", resp.StatusCode)
 		}
 		return resp.Body, nil

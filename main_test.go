@@ -293,7 +293,7 @@ func TestExporterScrape(t *testing.T) {
 		if r.URL.Path == "/stats/requests" {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(mockLocustResponse))
+			_, _ = w.Write([]byte(mockLocustResponse))
 		} else {
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -386,7 +386,7 @@ func TestFetchHTTP(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/test" {
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("test response"))
+			_, _ = w.Write([]byte("test response"))
 		} else {
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -400,7 +400,7 @@ func TestFetchHTTP(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		defer body.Close()
+		defer func() { _ = body.Close() }()
 
 		data, err := io.ReadAll(body)
 		if err != nil {
@@ -415,7 +415,7 @@ func TestFetchHTTP(t *testing.T) {
 	t.Run("404 error", func(t *testing.T) {
 		body, err := fetch("/notfound")
 		if err == nil {
-			body.Close()
+			_ = body.Close()
 			t.Error("expected error for 404, got none")
 		}
 		if !strings.Contains(err.Error(), "404") {
