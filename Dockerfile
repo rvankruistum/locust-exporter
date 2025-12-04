@@ -18,7 +18,10 @@ RUN go mod download
 COPY . .
 
 # Build static binary with version info injected
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+# TARGETARCH is automatically set by Docker buildx for multi-platform builds
+ARG TARGETOS=linux
+ARG TARGETARCH
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build \
     -a -tags netgo \
     -ldflags="-s -w \
       -X github.com/prometheus/common/version.Version=$(git describe --tags --always --dirty 2>/dev/null || echo 'dev') \
