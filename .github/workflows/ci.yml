@@ -37,7 +37,7 @@ jobs:
         run: go tool cover -func=coverage.out
 
       - name: Upload coverage
-        uses: codecov/codecov-action@015f24e6818733317a2da2edd6290ab26238649a # v4.6.0
+        uses: codecov/codecov-action@5a1091511ad55cbe89839c7260b706298ca349f7 # v4.6.0
         if: github.event_name == 'pull_request'
         with:
           files: ./coverage.out
