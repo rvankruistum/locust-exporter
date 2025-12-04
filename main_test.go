@@ -26,7 +26,9 @@ const mockLocustResponse = `{
       "current_rps": 10.5,
       "current_fail_per_sec": 0.5,
       "median_response_time": 120.0,
-      "avg_content_length": 1024.0
+      "avg_content_length": 1024.0,
+      "response_time_percentile_0.95": 480.0,
+      "response_time_percentile_0.99": 495.0
     },
     {
       "method": "POST",
@@ -39,7 +41,9 @@ const mockLocustResponse = `{
       "current_rps": 5.0,
       "current_fail_per_sec": 0.2,
       "median_response_time": 180.0,
-      "avg_content_length": 512.0
+      "avg_content_length": 512.0,
+      "response_time_percentile_0.95": 390.0,
+      "response_time_percentile_0.99": 398.0
     },
     {
       "method": "GET",
@@ -52,7 +56,9 @@ const mockLocustResponse = `{
       "current_rps": 15.5,
       "current_fail_per_sec": 0.7,
       "median_response_time": 140.0,
-      "avg_content_length": 850.0
+      "avg_content_length": 850.0,
+      "response_time_percentile_0.95": 450.0,
+      "response_time_percentile_0.99": 490.0
     }
   ],
   "errors": [
@@ -71,8 +77,10 @@ const mockLocustResponse = `{
   ],
   "total_rps": 15.5,
   "fail_ratio": 0.047,
-  "current_response_time_percentile_50": 140.0,
-  "current_response_time_percentile_95": 450.0,
+  "current_response_time_percentiles": {
+    "response_time_percentile_0.5": 140.0,
+    "response_time_percentile_0.95": 450.0
+  },
   "state": "running",
   "user_count": 100,
   "workers": [
@@ -335,6 +343,8 @@ func TestExporterScrape(t *testing.T) {
 		"locust_requests_fail_ratio",
 		"locust_requests_current_response_time_percentile_50",
 		"locust_requests_current_response_time_percentile_95",
+		"locust_requests_response_time_percentile_95",
+		"locust_requests_response_time_percentile_99",
 		"locust_requests_num_requests",
 		"locust_requests_avg_response_time",
 		"locust_errors",
