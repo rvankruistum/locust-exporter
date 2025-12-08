@@ -60,7 +60,7 @@ This package is available for Docker:
           - targets: ['<LOCUST_IP>:9646']
     ```
 
-4. Add dashboard to Grafana with ID [11985](https://grafana.com/grafana/dashboards/11985)
+4. Add dashboard to Grafana with ID [24526](https://grafana.com/grafana/dashboards/24526)
 
 ## Building and Running
 
