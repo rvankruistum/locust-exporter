@@ -102,7 +102,7 @@ jobs:
           platforms: linux/amd64
 
       - name: Scan image for CRITICAL vulnerabilities
-        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
+        uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # v0.33.1
         with:
           image-ref: ${{ env.REGISTRY }}:scan
           format: 'sarif'
