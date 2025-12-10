@@ -100,6 +100,15 @@ make build
 - `--locust.namespace`
   Namespace for prometheus metrics. Default `locust`.
 
+- `--pushgateway.url`
+  URL of Prometheus Pushgateway. If empty, push mode is disabled. Default is empty (disabled).
+
+- `--pushgateway.job`
+  Job label for Pushgateway metrics. Default is `locust`.
+
+- `--pushgateway.interval`
+  Interval for pushing metrics to Pushgateway. Default is `10s`.
+
 - `--log.level`
   Set logging level: one of `debug`, `info`, `warn`, `error`, `fatal`
 
@@ -125,6 +134,54 @@ The following environment variables configure the exporter:
 
 - `LOCUST_METRIC_NAMESPACE`
   Namespace for prometheus metrics. Default `locust`.
+
+- `LOCUST_EXPORTER_PUSHGATEWAY_URL`
+  URL of Prometheus Pushgateway. If empty, push mode is disabled. Default is empty (disabled).
+
+- `LOCUST_EXPORTER_PUSHGATEWAY_JOB`
+  Job label for Pushgateway metrics. Default is `locust`.
+
+- `LOCUST_EXPORTER_PUSHGATEWAY_INTERVAL`
+  Interval for pushing metrics to Pushgateway. Default is `10s`.
+
+## Push Mode (Pushgateway Support)
+
+For short-lived Locust tests, you can push metrics to a [Prometheus Pushgateway](https://github.com/prometheus/pushgateway) instead of relying on Prometheus scraping.
+
+> **⚠️ Warning:** Push mode requires Prometheus Pushgateway to be deployed and accessible. 
+
+### When to Use Push Mode
+
+Push mode is particularly useful in these scenarios:
+
+- **Local Development**: Running Locust locally while using a containerized exporter, where Prometheus can't easily scrape your local setup
+- **Clusters Without Prometheus**: Running load tests in environments where Prometheus is not deployed or accessible
+- **CI/CD Pipelines**: Batch load tests that run and complete quickly in CI/CD workflows
+- **Short-Lived Tests**: Tests that don't run long enough for Prometheus to scrape at its configured interval
+
+**Note:** If you have Prometheus already set up and scraping your infrastructure, the default pull-based mode is recommended. Push mode adds the Pushgateway as an intermediary component.
+
+### Basic Usage
+
+```bash
+./locust_exporter \
+  --locust.uri=http://localhost:8089 \
+  --pushgateway.url=http://pushgateway:9091
+```
+
+### How It Works
+
+1. Locust Exporter fetches metrics from Locust every scrape interval
+2. If Pushgateway is configured, metrics are pushed at the specified interval (default 10s)
+3. Prometheus scrapes the Pushgateway to retrieve the metrics
+4. The `/metrics` endpoint remains available for direct scraping (hybrid mode)
+
+### Notes
+
+- Push mode is **completely optional** - if not configured, the exporter works exactly as before
+- Both pull (scraping) and push modes can run simultaneously
+- Metrics are pushed using the `push` method, which replaces all previous metrics for the job
+- When a Locust test ends, metrics naturally go to zero (users, RPS, etc.)
 
 ### Grafana
 
