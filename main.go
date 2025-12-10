@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
@@ -9,12 +10,15 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/prometheus/client_golang/prometheus/push"
 	"github.com/prometheus/common/version"
 	"gopkg.in/alecthomas/kingpin.v2"
 )
@@ -464,13 +468,45 @@ func countWorkersByState(stats locustStats, state string) float64 {
 	return float64(count)
 }
 
+// pushMetricsPeriodically pushes metrics to Pushgateway at specified interval
+func pushMetricsPeriodically(ctx context.Context, url, job string, interval time.Duration, registry *prometheus.Registry) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	// Do an immediate push on startup
+	pusher := push.New(url, job).Gatherer(registry)
+	if err := pusher.Push(); err != nil {
+		slog.Error("Failed to push metrics to Pushgateway on startup", "error", err)
+	} else {
+		slog.Info("Successfully pushed metrics to Pushgateway on startup")
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			slog.Info("Stopping metrics push to Pushgateway")
+			return
+		case <-ticker.C:
+			pusher := push.New(url, job).Gatherer(registry)
+			if err := pusher.Push(); err != nil {
+				slog.Error("Failed to push metrics to Pushgateway", "error", err)
+			} else {
+				slog.Debug("Successfully pushed metrics to Pushgateway")
+			}
+		}
+	}
+}
+
 func main() {
 	var (
-		listenAddress = kingpin.Flag("web.listen-address", "Address to listen on for web interface and telemetry.").Default(":9646").Envar("LOCUST_EXPORTER_WEB_LISTEN_ADDRESS").String()
-		metricsPath   = kingpin.Flag("web.telemetry-path", "Path under which to expose metrics.").Default("/metrics").Envar("LOCUST_EXPORTER_WEB_TELEMETRY_PATH").String()
-		uri           = kingpin.Flag("locust.uri", "URI of Locust.").Default("http://localhost:8089").Envar("LOCUST_EXPORTER_URI").String()
-		NameSpace     = kingpin.Flag("locust.namespace", "Namespace for prometheus metrics.").Default("locust").Envar("LOCUST_METRIC_NAMESPACE").String()
-		timeout       = kingpin.Flag("locust.timeout", "Scrape timeout").Default("5s").Envar("LOCUST_EXPORTER_TIMEOUT").Duration()
+		listenAddress       = kingpin.Flag("web.listen-address", "Address to listen on for web interface and telemetry.").Default(":9646").Envar("LOCUST_EXPORTER_WEB_LISTEN_ADDRESS").String()
+		metricsPath         = kingpin.Flag("web.telemetry-path", "Path under which to expose metrics.").Default("/metrics").Envar("LOCUST_EXPORTER_WEB_TELEMETRY_PATH").String()
+		uri                 = kingpin.Flag("locust.uri", "URI of Locust.").Default("http://localhost:8089").Envar("LOCUST_EXPORTER_URI").String()
+		NameSpace           = kingpin.Flag("locust.namespace", "Namespace for prometheus metrics.").Default("locust").Envar("LOCUST_METRIC_NAMESPACE").String()
+		timeout             = kingpin.Flag("locust.timeout", "Scrape timeout").Default("5s").Envar("LOCUST_EXPORTER_TIMEOUT").Duration()
+		pushgatewayURL      = kingpin.Flag("pushgateway.url", "URL of Pushgateway. If empty, push mode is disabled.").Default("").Envar("LOCUST_EXPORTER_PUSHGATEWAY_URL").String()
+		pushgatewayJob      = kingpin.Flag("pushgateway.job", "Job label for Pushgateway.").Default("locust").Envar("LOCUST_EXPORTER_PUSHGATEWAY_JOB").String()
+		pushgatewayInterval = kingpin.Flag("pushgateway.interval", "Interval for pushing metrics to Pushgateway.").Default("10s").Envar("LOCUST_EXPORTER_PUSHGATEWAY_INTERVAL").Duration()
 	)
 
 	kingpin.Version(version.Print("locust_exporter"))
@@ -481,19 +517,61 @@ func main() {
 	slog.Info("Starting locust_exporter", "version", version.Info())
 	slog.Info("Build context", "context", version.BuildContext())
 
+	// Create custom registry
+	reg := prometheus.NewRegistry()
+
 	exporter, err := NewExporter(*uri, *timeout)
 	if err != nil {
 		slog.Error("Failed to create exporter", "error", err)
 		os.Exit(1)
 	}
-	prometheus.MustRegister(exporter)
-	prometheus.MustRegister(collectors.NewBuildInfoCollector())
+	reg.MustRegister(exporter)
+	reg.MustRegister(collectors.NewBuildInfoCollector())
 
-	http.Handle(*metricsPath, promhttp.Handler())
+	// If pushgateway is configured, start pusher
+	var pushCtx context.Context
+	var pushCancel context.CancelFunc
+	var pushWg sync.WaitGroup
+	if *pushgatewayURL != "" {
+		slog.Info("Pushgateway enabled",
+			"url", *pushgatewayURL,
+			"job", *pushgatewayJob,
+			"interval", *pushgatewayInterval)
+
+		pushCtx, pushCancel = context.WithCancel(context.Background())
+		defer pushCancel()
+
+		pushWg.Add(1)
+		go func() {
+			defer pushWg.Done()
+			pushMetricsPeriodically(pushCtx, *pushgatewayURL, *pushgatewayJob, *pushgatewayInterval, reg)
+		}()
+	} else {
+		slog.Debug("Pushgateway disabled (no URL configured)")
+	}
+
+	http.Handle(*metricsPath, promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
 	http.HandleFunc("/quitquitquit", func(http.ResponseWriter, *http.Request) { os.Exit(0) })
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`<html><head><title>Locust Exporter</title></head><body><h1>Locust Exporter</h1><p><a href='` + *metricsPath + `'>Metrics</a></p></body></html>`))
 	})
+
+	// Setup signal handling for graceful shutdown (after pushgateway is started)
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+	// Handle graceful shutdown
+	go func() {
+		<-sigChan
+		slog.Info("Received shutdown signal")
+		if pushCancel != nil {
+			pushCancel()
+			slog.Info("Waiting for pushgateway goroutine to finish...")
+			pushWg.Wait()
+			slog.Info("Pushgateway goroutine stopped")
+		}
+		os.Exit(0)
+	}()
 
 	slog.Info("Listening on", "address", *listenAddress)
 	if err := http.ListenAndServe(*listenAddress, nil); err != nil {
