@@ -111,7 +111,7 @@ jobs:
           exit-code: 1
 
       - name: Upload Trivy results to GitHub Security
-        uses: github/codeql-action/upload-sarif@4f3212b61783c3c68e8309a0f18a699764811cda # v3.27.9
+        uses: github/codeql-action/upload-sarif@5d4e8d1aca955e8d8589aabd499c5cae939e33c7 # v3.27.9
         if: always()
         with:
           sarif_file: 'trivy-results.sarif'
