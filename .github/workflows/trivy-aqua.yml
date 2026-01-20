@@ -38,7 +38,7 @@ jobs:
           severity: 'CRITICAL,HIGH,MEDIUM'
 
       - name: Upload results to GitHub Security
-        uses: github/codeql-action/upload-sarif@4f3212b61783c3c68e8309a0f18a699764811cda # v3.27.9
+        uses: github/codeql-action/upload-sarif@cdefb33c0f6224e58673d9004f47f7cb3e328b89 # v3.27.9
         if: always()
         with:
           sarif_file: 'trivy-results.sarif'
