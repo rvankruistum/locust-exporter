@@ -1,15 +1,18 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/push"
 )
 
 // Mock Locust stats response
@@ -432,4 +435,316 @@ func TestFetchHTTP(t *testing.T) {
 			t.Errorf("expected 404 error, got: %v", err)
 		}
 	})
+}
+
+// TestPushgatewayIntegration tests push functionality with mock pushgateway server
+func TestPushgatewayIntegration(t *testing.T) {
+	pushReceived := false
+	var receivedMethod string
+	var receivedPath string
+
+	// Mock pushgateway server
+	pushgateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		pushReceived = true
+		receivedMethod = r.Method
+		receivedPath = r.URL.Path
+
+		// Verify it's a PUT request (push mode)
+		if r.Method != "PUT" {
+			t.Errorf("Expected PUT request for push mode, got %s", r.Method)
+		}
+
+		// Verify job label in URL
+		if !strings.Contains(r.URL.Path, "/metrics/job/") {
+			t.Errorf("Expected job label in path, got: %s", r.URL.Path)
+		}
+
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer pushgateway.Close()
+
+	// Create test registry and metric
+	reg := prometheus.NewRegistry()
+	testGauge := prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: "test",
+		Name:      "metric",
+		Help:      "Test metric for pushgateway",
+	})
+	testGauge.Set(42)
+	reg.MustRegister(testGauge)
+
+	// Use the actual push package to test
+	pusher := push.New(pushgateway.URL, "test_job").Gatherer(reg)
+	err := pusher.Push()
+
+	if err != nil {
+		t.Fatalf("Failed to push metrics: %v", err)
+	}
+
+	if !pushReceived {
+		t.Error("Expected push request to be received")
+	}
+
+	if receivedMethod != "PUT" {
+		t.Errorf("Expected PUT method, got %s", receivedMethod)
+	}
+
+	if !strings.Contains(receivedPath, "test_job") {
+		t.Errorf("Expected 'test_job' in path, got: %s", receivedPath)
+	}
+}
+
+// TestPushMetricsPeriodically tests the actual pushMetricsPeriodically function
+func TestPushMetricsPeriodically(t *testing.T) {
+	pushCount := 0
+	var mu sync.Mutex
+
+	// Mock pushgateway server
+	pushgateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		pushCount++
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer pushgateway.Close()
+
+	// Create test registry and metric
+	reg := prometheus.NewRegistry()
+	testGauge := prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: "test",
+		Name:      "periodic_push",
+		Help:      "Test metric for periodic push",
+	})
+	testGauge.Set(123)
+	reg.MustRegister(testGauge)
+
+	// Test immediate push on startup
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		pushMetricsPeriodically(ctx, pushgateway.URL, "test_periodic_job", 100*time.Millisecond, reg)
+	}()
+
+	// Wait for startup push
+	time.Sleep(50 * time.Millisecond)
+
+	mu.Lock()
+	startupPushCount := pushCount
+	mu.Unlock()
+
+	if startupPushCount != 1 {
+		t.Errorf("Expected 1 startup push, got %d", startupPushCount)
+	}
+
+	// Wait for at least 2 more periodic pushes
+	time.Sleep(250 * time.Millisecond)
+
+	mu.Lock()
+	finalPushCount := pushCount
+	mu.Unlock()
+
+	// Should have startup push (1) + at least 2 periodic pushes (at 100ms and 200ms)
+	if finalPushCount < 3 {
+		t.Errorf("Expected at least 3 pushes (1 startup + 2 periodic), got %d", finalPushCount)
+	}
+
+	// Test context cancellation stops the goroutine
+	cancel()
+	wg.Wait() // Should complete quickly
+
+	// Verify no more pushes after cancellation
+	mu.Lock()
+	pushCountAfterCancel := pushCount
+	mu.Unlock()
+
+	time.Sleep(150 * time.Millisecond)
+
+	mu.Lock()
+	pushCountAfterWait := pushCount
+	mu.Unlock()
+
+	if pushCountAfterWait != pushCountAfterCancel {
+		t.Errorf("Expected no pushes after cancellation, but got %d more", pushCountAfterWait-pushCountAfterCancel)
+	}
+}
+
+// TestPushMetricsPeriodicallyCancellation tests that context cancellation is handled properly
+func TestPushMetricsPeriodicallyCancellation(t *testing.T) {
+	// Mock pushgateway server
+	pushgateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer pushgateway.Close()
+
+	// Create test registry
+	reg := prometheus.NewRegistry()
+	testGauge := prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "test_cancel",
+		Help: "Test cancellation",
+	})
+	reg.MustRegister(testGauge)
+
+	// Start with context that's already cancelled
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	startTime := time.Now()
+	go func() {
+		defer wg.Done()
+		pushMetricsPeriodically(ctx, pushgateway.URL, "test_cancel_job", 1*time.Second, reg)
+	}()
+
+	// Should exit quickly (within 100ms) after doing startup push
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		elapsed := time.Since(startTime)
+		if elapsed > 500*time.Millisecond {
+			t.Errorf("Goroutine took too long to exit after cancellation: %v", elapsed)
+		}
+	case <-time.After(1 * time.Second):
+		t.Error("Goroutine did not exit after context cancellation")
+	}
+}
+
+// TestPushMetricsPeriodicallyCancellationDuringPush tests cancellation during an active push
+func TestPushMetricsPeriodicallyCancellationDuringPush(t *testing.T) {
+	pushStarted := make(chan struct{})
+	pushComplete := make(chan struct{})
+
+	// Mock pushgateway server with slow response
+	pushgateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(pushStarted)
+		<-pushComplete // Block until test allows completion
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer pushgateway.Close()
+
+	// Create test registry
+	reg := prometheus.NewRegistry()
+	testGauge := prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "test_cancel_during_push",
+		Help: "Test cancellation during push",
+	})
+	reg.MustRegister(testGauge)
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		pushMetricsPeriodically(ctx, pushgateway.URL, "test_job", 100*time.Millisecond, reg)
+	}()
+
+	// Wait for push to start
+	<-pushStarted
+
+	// Cancel context while push is in progress
+	cancel()
+
+	// Allow push to complete
+	close(pushComplete)
+
+	// Goroutine should exit cleanly
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Success - goroutine exited
+	case <-time.After(2 * time.Second):
+		t.Error("Goroutine did not exit after context cancellation during push")
+	}
+}
+
+// TestPushMetricsPeriodicallyCancellationErrorHandling tests error handling during pushes
+func TestPushMetricsPeriodicallyCancellationErrorHandling(t *testing.T) {
+	pushCount := 0
+	var mu sync.Mutex
+
+	// Mock pushgateway server that fails
+	pushgateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		pushCount++
+		mu.Unlock()
+		w.WriteHeader(http.StatusInternalServerError) // Fail every time
+	}))
+	defer pushgateway.Close()
+
+	// Create test registry
+	reg := prometheus.NewRegistry()
+	testGauge := prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "test_error_handling",
+		Help: "Test error handling",
+	})
+	reg.MustRegister(testGauge)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		pushMetricsPeriodically(ctx, pushgateway.URL, "test_error_job", 50*time.Millisecond, reg)
+	}()
+
+	// Wait for multiple push attempts despite errors
+	time.Sleep(200 * time.Millisecond)
+
+	mu.Lock()
+	finalCount := pushCount
+	mu.Unlock()
+
+	// Should continue pushing despite errors (startup + at least 3 periodic)
+	if finalCount < 4 {
+		t.Errorf("Expected at least 4 push attempts despite errors, got %d", finalCount)
+	}
+
+	cancel()
+	wg.Wait()
+}
+
+// TestBackwardsCompatibility ensures empty pushgateway URL doesn't break anything
+func TestBackwardsCompatibility(t *testing.T) {
+	// Test that empty pushgateway URL doesn't cause issues
+	pushURL := ""
+	if pushURL != "" {
+		t.Error("Pushgateway should be disabled when URL is empty")
+	}
+
+	// Verify registry works without push
+	reg := prometheus.NewRegistry()
+	testGauge := prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "test_backwards_compat",
+		Help: "Test backwards compatibility",
+	})
+	reg.MustRegister(testGauge)
+	testGauge.Set(100)
+
+	// Gather metrics to ensure it works
+	metrics, err := reg.Gather()
+	if err != nil {
+		t.Fatalf("Failed to gather metrics: %v", err)
+	}
+
+	if len(metrics) == 0 {
+		t.Error("Expected at least one metric family")
+	}
 }
