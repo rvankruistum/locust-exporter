@@ -54,7 +54,7 @@ jobs:
           sha256sum locust_exporter-* > SHA256SUMS
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@c062e08bd532815e2082a85e87e3ef29c3e6d191 # v2.2.0
+        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2.2.0
         with:
           files: |
             dist/*
